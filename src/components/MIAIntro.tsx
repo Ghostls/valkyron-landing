@@ -176,9 +176,10 @@ export default function MIAIntro({ onEnter }: MIAIntroProps) {
       positions[i * 3 + 2] = origPos[i * 3 + 2] = z
 
       const t = phi / Math.PI
-      colors[i * 3]     = 0.15 + t * 0.55
-      colors[i * 3 + 1] = 0.05 + t * 0.10
-      colors[i * 3 + 2] = 0.85 - t * 0.30
+      // Base tenue: el brillo lo aportan sinapsis y pulsos, no el color sólido
+      colors[i * 3]     = 0.20 + t * 0.40
+      colors[i * 3 + 1] = 0.10 + t * 0.10
+      colors[i * 3 + 2] = 0.65 - t * 0.20
     }
     colorsOrigRef.current = new Float32Array(colors)
 
@@ -186,11 +187,57 @@ export default function MIAIntro({ onEnter }: MIAIntroProps) {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     const mat = new THREE.PointsMaterial({
-      size: 0.021, vertexColors: true, transparent: true,
-      opacity: 0.9, sizeAttenuation: true, blending: THREE.AdditiveBlending,
+      size: 0.018, vertexColors: true, transparent: true,
+      opacity: 0.75, sizeAttenuation: true, blending: THREE.AdditiveBlending, depthWrite: false,
     })
     const pts = new THREE.Points(geo, mat)
     group.add(pts)
+
+    /* --- Red neuronal: sinapsis entre nodos cercanos (precomputadas una vez) --- */
+    const linkPairs: [number, number][] = []
+    const sampleStep = 5
+    const maxLinkDist = 0.17
+    const maxLinksPerNode = 3
+    for (let i = 0; i < count; i += sampleStep) {
+      let made = 0
+      const ax = origPos[i * 3], ay = origPos[i * 3 + 1], az = origPos[i * 3 + 2]
+      for (let j = i + sampleStep; j < count && made < maxLinksPerNode; j += sampleStep) {
+        const dx = ax - origPos[j * 3], dy = ay - origPos[j * 3 + 1], dz = az - origPos[j * 3 + 2]
+        if (Math.sqrt(dx * dx + dy * dy + dz * dz) < maxLinkDist) { linkPairs.push([i, j]); made++ }
+      }
+    }
+    const linkCount = linkPairs.length
+    const linkPos = new Float32Array(linkCount * 6)
+    const linkCol = new Float32Array(linkCount * 6)
+    const linkGeo = new THREE.BufferGeometry()
+    linkGeo.setAttribute('position', new THREE.BufferAttribute(linkPos, 3))
+    linkGeo.setAttribute('color', new THREE.BufferAttribute(linkCol, 3))
+    const linkMat = new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.28,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+    const lines = new THREE.LineSegments(linkGeo, linkMat)
+    group.add(lines)
+    const linkPosAttr = linkGeo.getAttribute('position') as THREE.BufferAttribute
+    const linkColAttr = linkGeo.getAttribute('color') as THREE.BufferAttribute
+
+    /* --- Pulsos que viajan por las sinapsis (señales neuronales) --- */
+    const PULSES = 22
+    const pulses = Array.from({ length: PULSES }, () => ({
+      link: Math.floor(Math.random() * Math.max(1, linkCount)),
+      t: Math.random(),
+      speed: 0.006 + Math.random() * 0.014,
+    }))
+    const pulsePos = new Float32Array(PULSES * 3)
+    const pulseGeo = new THREE.BufferGeometry()
+    pulseGeo.setAttribute('position', new THREE.BufferAttribute(pulsePos, 3))
+    const pulseMat = new THREE.PointsMaterial({
+      size: 0.045, color: 0xC4B5FD, transparent: true, opacity: 0.95,
+      sizeAttenuation: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+    const pulsePts = new THREE.Points(pulseGeo, pulseMat)
+    group.add(pulsePts)
+    const pulsePosAttr = pulseGeo.getAttribute('position') as THREE.BufferAttribute
 
     /* --- Capa 2: núcleo interno brillante (glow del "cerebro") --- */
     const coreGeo = new THREE.SphereGeometry(0.42, 32, 32)
@@ -296,7 +343,44 @@ export default function MIAIntro({ onEnter }: MIAIntroProps) {
       posAttr.needsUpdate = true
       colAttr.needsUpdate = true
 
-      // Órbitas
+      // ── Sinapsis: siguen a los nodos deformados; brillan con la voz de MIA ──
+      const pArr = posAttr.array as Float32Array
+      const voiceGlow = audio * 0.6 + boost * 0.4
+      for (let k = 0; k < linkCount; k++) {
+        const [a, b] = linkPairs[k]
+        linkPosAttr.array[k * 6]     = pArr[a * 3]
+        linkPosAttr.array[k * 6 + 1] = pArr[a * 3 + 1]
+        linkPosAttr.array[k * 6 + 2] = pArr[a * 3 + 2]
+        linkPosAttr.array[k * 6 + 3] = pArr[b * 3]
+        linkPosAttr.array[k * 6 + 4] = pArr[b * 3 + 1]
+        linkPosAttr.array[k * 6 + 5] = pArr[b * 3 + 2]
+        const flow = (0.5 + 0.5 * Math.sin(tick * 3 + k * 0.5)) * (1 + voiceGlow)
+        const cr = (0.35 + auroraLerp * 0.2) * flow
+        const cg = (0.2 + auroraLerp * 0.4 + voiceGlow * 0.3) * flow
+        const cb = 0.85 * flow
+        linkColAttr.array[k * 6]     = cr
+        linkColAttr.array[k * 6 + 1] = cg
+        linkColAttr.array[k * 6 + 2] = cb
+        linkColAttr.array[k * 6 + 3] = cr * 0.5
+        linkColAttr.array[k * 6 + 4] = cg * 0.7
+        linkColAttr.array[k * 6 + 5] = cb
+      }
+      linkPosAttr.needsUpdate = true
+      linkColAttr.needsUpdate = true
+      linkMat.opacity = 0.2 + m.strength * 0.22 + audio * 0.35
+
+      // ── Pulsos viajando por las sinapsis (aceleran al hablar) ──
+      for (let pi = 0; pi < PULSES; pi++) {
+        const pulse = pulses[pi]
+        pulse.t += pulse.speed * (1 + m.strength + audio * 2)
+        if (pulse.t >= 1) { pulse.t = 0; pulse.link = Math.floor(Math.random() * Math.max(1, linkCount)) }
+        const [a, b] = linkPairs[pulse.link] || [0, 0]
+        const t2 = pulse.t
+        pulsePosAttr.array[pi * 3]     = pArr[a * 3] + (pArr[b * 3] - pArr[a * 3]) * t2
+        pulsePosAttr.array[pi * 3 + 1] = pArr[a * 3 + 1] + (pArr[b * 3 + 1] - pArr[a * 3 + 1]) * t2
+        pulsePosAttr.array[pi * 3 + 2] = pArr[a * 3 + 2] + (pArr[b * 3 + 2] - pArr[a * 3 + 2]) * t2
+      }
+      pulsePosAttr.needsUpdate = true
       for (let i = 0; i < orbCount; i++) {
         const o = orbData[i]
         o.a += 0.004 * o.speed * (1 + audio * 2 + boost)
@@ -341,6 +425,8 @@ export default function MIAIntro({ onEnter }: MIAIntroProps) {
       geo.dispose(); mat.dispose()
       coreGeo.dispose(); coreMat.dispose()
       orbGeo.dispose(); orbMat.dispose()
+      linkGeo.dispose(); linkMat.dispose()
+      pulseGeo.dispose(); pulseMat.dispose()
       wrap.removeEventListener('mousemove', onMove)
       wrap.removeEventListener('mouseenter', onEnterWrap)
       wrap.removeEventListener('mouseleave', onLeaveWrap)
@@ -375,15 +461,16 @@ export default function MIAIntro({ onEnter }: MIAIntroProps) {
       <StarField />
       <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(transparent,transparent 3px,rgba(124,58,237,.012) 3px,rgba(124,58,237,.012) 4px)', pointerEvents: 'none', zIndex: 1 }} />
 
-      <div style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <img src={Logo1} alt="Valkyron Group" style={{ width: '120px', marginBottom: '1.5rem', opacity: 0.9 }} />
+      <div style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', padding: '0 6%', boxSizing: 'border-box' }}>
+        <img src={Logo1} alt="Valkyron Group" style={{ width: 'min(120px, 32vw)', marginBottom: '1.5rem', opacity: 0.9 }} />
 
         <div
           ref={wrapRef}
-          style={{ position: 'relative', width: '360px', height: '360px', cursor: 'pointer', marginBottom: '2rem' }}
+          className="mia-sphere-wrap"
+          style={{ position: 'relative', cursor: 'pointer', marginBottom: '2rem' }}
           onClick={handleActivate}
         >
-          <canvas ref={canvasRef} style={{ width: '360px', height: '360px', display: 'block' }} />
+          <canvas ref={canvasRef} className="mia-canvas" style={{ display: 'block' }} />
 
           {/* Glow externo — pulsa cuando MIA habla */}
           <div style={{
@@ -453,6 +540,13 @@ export default function MIAIntro({ onEnter }: MIAIntroProps) {
         @keyframes twinkle { 0%,100%{opacity:.15} 50%{opacity:.7} }
         @keyframes coreGlow { 0%,100%{opacity:.7} 50%{opacity:1} }
         @keyframes speakBar { 0%,100%{height:5px} 50%{height:18px} }
+
+        /* Mobile-first: esfera fluida */
+        .mia-sphere-wrap { width: min(300px, 78vw); height: min(300px, 78vw); }
+        .mia-canvas { width: 100%; height: 100%; }
+        @media (min-width: 640px) {
+          .mia-sphere-wrap { width: 360px; height: 360px; }
+        }
       `}</style>
     </div>
   )

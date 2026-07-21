@@ -85,20 +85,74 @@ export default function Hero() {
       positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
       positions[i * 3 + 2] = r * Math.cos(phi)
       const t = phi / Math.PI
-      colors[i * 3] = 0.15 + t * 0.55
-      colors[i * 3 + 1] = 0.05 + t * 0.08
-      colors[i * 3 + 2] = 0.85 - t * 0.35
+      // Base translúcida azul→violeta, tenue (el brillo lo dan sinapsis y pulsos)
+      colors[i * 3] = 0.20 + t * 0.40
+      colors[i * 3 + 1] = 0.10 + t * 0.10
+      colors[i * 3 + 2] = 0.65 - t * 0.20
     }
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-    const mat = new THREE.PointsMaterial({ size: 0.02, vertexColors: true, transparent: true, opacity: 0.9, sizeAttenuation: true })
+    const mat = new THREE.PointsMaterial({
+      size: 0.016, vertexColors: true, transparent: true,
+      opacity: 0.7, sizeAttenuation: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    })
     const pts = new THREE.Points(geo, mat)
     scene.add(pts)
     const posAttr = geo.getAttribute('position') as THREE.BufferAttribute
     const colAttr = geo.getAttribute('color') as THREE.BufferAttribute
     const origPos = new Float32Array(positions)
     const origCol = new Float32Array(colors)
+
+    /* ── Red neuronal: conexiones sinápticas entre nodos cercanos ──
+       Se precomputan una vez (buscar vecinos cada frame sería O(n²) y mataría el FPS).
+       Solo una muestra de nodos genera conexiones, para densidad controlada. */
+    const linkPairs: [number, number][] = []
+    const sampleStep = 4           // 1 de cada 4 nodos es "neurona" que conecta
+    const maxLinkDist = 0.17       // radio de conexión
+    const maxLinksPerNode = 3
+    for (let i = 0; i < count; i += sampleStep) {
+      let made = 0
+      const ax = origPos[i * 3], ay = origPos[i * 3 + 1], az = origPos[i * 3 + 2]
+      for (let j = i + sampleStep; j < count && made < maxLinksPerNode; j += sampleStep) {
+        const dx = ax - origPos[j * 3], dy = ay - origPos[j * 3 + 1], dz = az - origPos[j * 3 + 2]
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
+        if (d < maxLinkDist) { linkPairs.push([i, j]); made++ }
+      }
+    }
+    const linkCount = linkPairs.length
+    const linkPos = new Float32Array(linkCount * 6)
+    const linkCol = new Float32Array(linkCount * 6)
+    const linkGeo = new THREE.BufferGeometry()
+    linkGeo.setAttribute('position', new THREE.BufferAttribute(linkPos, 3))
+    linkGeo.setAttribute('color', new THREE.BufferAttribute(linkCol, 3))
+    const linkMat = new THREE.LineBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.32,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+    const lines = new THREE.LineSegments(linkGeo, linkMat)
+    scene.add(lines)
+    const linkPosAttr = linkGeo.getAttribute('position') as THREE.BufferAttribute
+    const linkColAttr = linkGeo.getAttribute('color') as THREE.BufferAttribute
+
+    /* ── Pulsos que viajan por las sinapsis (señales neuronales) ── */
+    const PULSES = 26
+    const pulses = Array.from({ length: PULSES }, () => ({
+      link: Math.floor(Math.random() * Math.max(1, linkCount)),
+      t: Math.random(),
+      speed: 0.006 + Math.random() * 0.014,
+    }))
+    const pulsePos = new Float32Array(PULSES * 3)
+    const pulseGeo = new THREE.BufferGeometry()
+    pulseGeo.setAttribute('position', new THREE.BufferAttribute(pulsePos, 3))
+    const pulseMat = new THREE.PointsMaterial({
+      size: 0.05, color: 0xC4B5FD, transparent: true, opacity: 0.95,
+      sizeAttenuation: true, blending: THREE.AdditiveBlending, depthWrite: false,
+    })
+    const pulsePts = new THREE.Points(pulseGeo, pulseMat)
+    scene.add(pulsePts)
+    const pulsePosAttr = pulseGeo.getAttribute('position') as THREE.BufferAttribute
+
     const auroraColors = [[0.0, 1.0, 0.7], [0.5, 0.0, 1.0], [0.0, 0.6, 1.0]]
     let tick = 0, auroraLerp = 0, auroraTarget = 0, lastSwitch = 0
 
@@ -131,8 +185,54 @@ export default function Hero() {
         colAttr.array[i * 3 + 2] = origCol[i * 3 + 2] + (ab - origCol[i * 3 + 2]) * shimmer
       }
       posAttr.needsUpdate = true; colAttr.needsUpdate = true
+
+      // ── Actualizar sinapsis: siguen a los nodos deformados, con color/opacidad por distancia ──
+      const p = posAttr.array as Float32Array
+      for (let k = 0; k < linkCount; k++) {
+        const [a, b] = linkPairs[k]
+        const ax = p[a * 3], ay = p[a * 3 + 1], az = p[a * 3 + 2]
+        const bx = p[b * 3], by = p[b * 3 + 1], bz = p[b * 3 + 2]
+        linkPosAttr.array[k * 6]     = ax
+        linkPosAttr.array[k * 6 + 1] = ay
+        linkPosAttr.array[k * 6 + 2] = az
+        linkPosAttr.array[k * 6 + 3] = bx
+        linkPosAttr.array[k * 6 + 4] = by
+        linkPosAttr.array[k * 6 + 5] = bz
+        // Brillo que fluye por la línea con el tiempo (no color sólido)
+        const flow = 0.55 + 0.45 * Math.sin(tick * 3 + k * 0.5)
+        const cr = (0.35 + auroraLerp * 0.2) * flow
+        const cg = (0.2 + auroraLerp * 0.4) * flow
+        const cb = (0.85) * flow
+        // extremo A
+        linkColAttr.array[k * 6]     = cr
+        linkColAttr.array[k * 6 + 1] = cg
+        linkColAttr.array[k * 6 + 2] = cb
+        // extremo B (ligeramente distinto => gradiente a lo largo de la línea)
+        linkColAttr.array[k * 6 + 3] = cr * 0.5
+        linkColAttr.array[k * 6 + 4] = cg * 0.7
+        linkColAttr.array[k * 6 + 5] = cb
+      }
+      linkPosAttr.needsUpdate = true
+      linkColAttr.needsUpdate = true
+      linkMat.opacity = 0.22 + m.strength * 0.25
+
+      // ── Pulsos viajando por las sinapsis ──
+      for (let pi = 0; pi < PULSES; pi++) {
+        const pulse = pulses[pi]
+        pulse.t += pulse.speed * (1 + m.strength)
+        if (pulse.t >= 1) { pulse.t = 0; pulse.link = Math.floor(Math.random() * Math.max(1, linkCount)) }
+        const [a, b] = linkPairs[pulse.link] || [0, 0]
+        const t2 = pulse.t
+        pulsePosAttr.array[pi * 3]     = p[a * 3] + (p[b * 3] - p[a * 3]) * t2
+        pulsePosAttr.array[pi * 3 + 1] = p[a * 3 + 1] + (p[b * 3 + 1] - p[a * 3 + 1]) * t2
+        pulsePosAttr.array[pi * 3 + 2] = p[a * 3 + 2] + (p[b * 3 + 2] - p[a * 3 + 2]) * t2
+      }
+      pulsePosAttr.needsUpdate = true
+
       pts.rotation.y += 0.0008 + m.strength * 0.002
       pts.rotation.x += 0.0003
+      lines.rotation.copy(pts.rotation)
+      pulsePts.rotation.copy(pts.rotation)
       renderer.render(scene, camera)
     }
     animate()
@@ -148,16 +248,18 @@ export default function Hero() {
 
     return () => {
       cancelAnimationFrame(frameRef.current)
+      geo.dispose(); mat.dispose()
+      linkGeo.dispose(); linkMat.dispose()
+      pulseGeo.dispose(); pulseMat.dispose()
       renderer.dispose()
       wrap.removeEventListener('mousemove', onMove)
     }
   }, [])
 
   return (
-    <section id="hero" style={{
+    <section id="hero" className="vk-hero" style={{
       minHeight: '100vh', display: 'flex', flexDirection: 'column',
       justifyContent: 'center', position: 'relative', overflow: 'hidden',
-      padding: '120px 5% 0',
     }}>
       <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }} />
       <div style={{
@@ -168,10 +270,9 @@ export default function Hero() {
       <div style={{ position: 'absolute', top: '10%', left: '-10%', width: '50vw', height: '50vw', background: 'radial-gradient(circle,rgba(124,58,237,0.08) 0%,transparent 65%)', pointerEvents: 'none' }} />
 
       {/* Two-column layout */}
-      <div style={{
+      <div className="vk-hero-grid" style={{
         position: 'relative', zIndex: 2,
         display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
         gap: '2rem',
         alignItems: 'center',
         width: '100%',
@@ -199,12 +300,12 @@ export default function Hero() {
           }}>
             <h1 style={{
               fontFamily: "'Rajdhani', sans-serif",
-              fontSize: 'clamp(44px,5.5vw,86px)', fontWeight: 700,
+              fontSize: 'clamp(40px,5vw,78px)', fontWeight: 700,
               lineHeight: 0.92, letterSpacing: '-1px', textTransform: 'uppercase', margin: 0,
             }}>
-              <span style={{ display: 'block', color: '#E2E8F0' }}>El futuro</span>
-              <span style={{ display: 'block', color: 'transparent', WebkitTextStroke: '1px rgba(167,139,250,0.45)', lineHeight: 1.05 }}>no espera.</span>
-              <span style={{ display: 'block', color: '#7C3AED' }}>Nosotros tampoco.</span>
+              <span style={{ display: 'block', color: '#E2E8F0' }}>Donde otros</span>
+              <span style={{ display: 'block', color: 'transparent', WebkitTextStroke: '1px rgba(167,139,250,0.45)', lineHeight: 1.05 }}>ven límites,</span>
+              <span style={{ display: 'block', color: '#7C3AED' }}>nosotros desplegamos.</span>
             </h1>
           </div>
 
@@ -216,11 +317,12 @@ export default function Hero() {
               fontSize: 'clamp(13px,1.2vw,16px)', color: 'rgba(255,255,255,0.4)',
               lineHeight: 1.8, marginBottom: '2rem', fontWeight: 300, maxWidth: '460px',
             }}>
-              Desde drones autónomos con visión artificial hasta ERPs de manufactura —
-              cada sistema está diseñado para operar donde otros fallan.
+              Valkyron Group es tecnología de defensa hecha arquitectura de software.
+              Autonomía, visión artificial e infraestructura estratégica, diseñadas
+              para el terreno más exigente.
               <br /><br />
               <span style={{ color: 'rgba(255,255,255,0.6)' }}>
-                No vendemos software. Desplegamos infraestructura tecnológica de nivel estratégico.
+                El futuro no se espera. Se despliega.
               </span>
             </p>
 
@@ -247,7 +349,7 @@ export default function Hero() {
         </div>
 
         {/* RIGHT — MIA sphere */}
-        <div ref={wrapRef} style={{
+        <div ref={wrapRef} className="vk-hero-visual" style={{
           position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
           opacity: mounted ? 1 : 0, transition: 'opacity 1.2s ease 0.5s',
         }}>
@@ -278,7 +380,7 @@ export default function Hero() {
             marginTop: '200px',
           }}>MIA — Valkyron</div>
 
-          <canvas ref={sphereRef} style={{ width: '480px', height: '480px', display: 'block', position: 'relative', zIndex: 1 }} />
+          <canvas ref={sphereRef} style={{ width: 'min(480px, 42vw)', height: 'min(480px, 42vw)', maxWidth: '480px', maxHeight: '480px', display: 'block', position: 'relative', zIndex: 1 }} />
         </div>
       </div>
 
@@ -294,11 +396,11 @@ export default function Hero() {
       </div>
 
       {/* Stats bar */}
-      <div style={{
+      <div className="vk-stats" style={{
         position: 'relative', zIndex: 2,
         paddingTop: '2rem', paddingBottom: '2.5rem',
         borderTop: '1px solid rgba(124,58,237,0.12)',
-        display: 'grid', gridTemplateColumns: 'repeat(4,1fr)',
+        display: 'grid',
         opacity: mounted ? 1 : 0, transition: 'opacity 1s ease 0.7s',
       }}>
         {stats.map((s, i) => (
@@ -318,10 +420,22 @@ export default function Hero() {
         @keyframes gridpulse{0%,100%{opacity:.4}50%{opacity:1}}
         @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
         @keyframes scrollpulse{0%,100%{opacity:.4;transform:scaleY(1)}50%{opacity:1;transform:scaleY(1.15)}}
-        @media(max-width:900px){
-          #hero>div:nth-child(4){grid-template-columns:1fr!important}
-          #hero>div:nth-child(4)>div:last-child{display:none!important}
-          #hero>div:nth-child(6){grid-template-columns:repeat(2,1fr)!important}
+
+        /* Mobile-first: una columna, luego se expande */
+        .vk-hero { padding: 96px 6% 0; }
+        .vk-hero-grid { grid-template-columns: 1fr; }
+        .vk-hero-visual { display: none; }
+        .vk-stats { grid-template-columns: repeat(2,1fr); gap: 1.5rem 0; }
+        .vk-stats > div { border-right: none !important; padding-right: 1rem !important; }
+
+        @media (min-width: 640px) {
+          .vk-stats { grid-template-columns: repeat(4,1fr); }
+          .vk-stats > div:not(:last-child) { border-right: 1px solid rgba(124,58,237,0.1) !important; }
+        }
+        @media (min-width: 900px) {
+          .vk-hero { padding: 120px 5% 0; }
+          .vk-hero-grid { grid-template-columns: 1fr 1fr; }
+          .vk-hero-visual { display: flex; }
         }
       `}</style>
     </section>
