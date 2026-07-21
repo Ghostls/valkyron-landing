@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
-import Logo2 from '../assets/Logo2.png'
 
 const stats = [
   { num: '5', suffix: '+', label: 'Sistemas\ndesplegados' },
@@ -181,13 +180,6 @@ export default function Hero() {
 
         {/* LEFT — text */}
         <div>
-          <img src={Logo2} alt="Valkyron Group" style={{
-            height: '40px', marginBottom: '2.5rem', opacity: mounted ? 0.92 : 0,
-            transform: mounted ? 'translateY(0)' : 'translateY(12px)',
-            transition: 'opacity 0.8s ease, transform 0.8s ease',
-            objectFit: 'contain', objectPosition: 'left', display: 'block',
-          }} />
-
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: '8px',
             padding: '5px 14px', border: '1px solid rgba(124,58,237,0.25)',
@@ -284,7 +276,7 @@ export default function Hero() {
             fontSize: '9px', letterSpacing: '4px', textTransform: 'uppercase',
             color: 'rgba(124,58,237,0.25)', pointerEvents: 'none', userSelect: 'none',
             marginTop: '200px',
-          }}>M.I.A. — Valkyron</div>
+          }}>MIA — Valkyron</div>
 
           <canvas ref={sphereRef} style={{ width: '480px', height: '480px', display: 'block', position: 'relative', zIndex: 1 }} />
         </div>

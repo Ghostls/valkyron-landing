@@ -1,4 +1,5 @@
 import React from 'react'
+import Logo2 from '../assets/Logo2.png'
 
 const navStyle: React.CSSProperties = {
   position: 'fixed',
@@ -26,9 +27,13 @@ const links: { label: string; href: string }[] = [
 export default function Navbar() {
   return (
     <nav style={navStyle}>
-      <div style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: '22px', fontWeight: 700, letterSpacing: '4px', textTransform: 'uppercase', color: '#E2E8F0' }}>
-        VALKYRON<span style={{ color: '#7C3AED' }}>.</span>GROUP
-      </div>
+      <a href="#hero" style={{ display: 'flex', alignItems: 'center', textDecoration: 'none' }}>
+        <img
+          src={Logo2}
+          alt="Valkyron Group"
+          style={{ height: '34px', objectFit: 'contain', display: 'block' }}
+        />
+      </a>
 
       <div style={{ display: 'flex', gap: '2rem' }}>
         {links.map(l => (
